@@ -1,0 +1,43 @@
+name: Unity Code Review
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+  pull_request:
+    branches:
+      - master
+      - main
+      - develop
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+      
+      - name: Run code review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          UNITY_PROJECT_PATH: ${{ secrets.UNITY_PROJECT_PATH }}
+          EXCLUDE_DIRS: ${{ secrets.EXCLUDE_DIRS }}
+        run: |
+          python scripts/code_reviewer.py

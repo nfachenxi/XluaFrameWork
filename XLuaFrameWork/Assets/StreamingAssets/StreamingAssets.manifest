@@ -1,0 +1,19 @@
+ManifestFileVersion: 0
+CRC: 3692775896
+AssetBundleManifest:
+  AssetBundleInfos:
+    Info_0:
+      Name: ui/res/background.png.nfa
+      Dependencies: {}
+    Info_1:
+      Name: ui/res/button_150.png.nfa
+      Dependencies: {}
+    Info_2:
+      Name: ui/res/radio_100.png.nfa
+      Dependencies: {}
+    Info_3:
+      Name: ui/res/slider_handle.png.nfa
+      Dependencies: {}
+    Info_4:
+      Name: ui/res/universal_panel_40.png.nfa
+      Dependencies: {}
