@@ -16,7 +16,7 @@ namespace Framework.Utils
         /// <summary>
         /// 获取Unity的相对路径
         /// </summary>
-        /// <param name="path">绝对路径</param>
+        /// <param name="path">文件的绝对路径</param>
         /// <returns>相对路径</returns>
         public static string GetUnityPath(string path)
         {

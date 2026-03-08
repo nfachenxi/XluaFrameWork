@@ -22,6 +22,9 @@ class CodeReviewer:
         self.api_base = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
         self.webhook_url = os.getenv('WEBHOOK_URL')
         
+        # AI 模型配置
+        self.model = os.getenv('AI_MODEL', 'deepseek-chat')
+        
         # Unity 项目路径配置（相对于仓库根目录）
         # 例如：'XLuaFrameWork' 或 'XLuaFrameWork/Assets'
         self.unity_project_path = os.getenv('UNITY_PROJECT_PATH', '.')
@@ -37,6 +40,7 @@ class CodeReviewer:
         self.client = OpenAI(api_key=self.api_key, base_url=self.api_base)
         self.repo = git.Repo('.')
         
+        print(f"🤖 AI 模型: {self.model}")
         print(f"📁 Unity 项目路径: {self.unity_project_path}")
         print(f"🚫 排除目录: {', '.join(self.exclude_dirs)}")
         
@@ -172,7 +176,7 @@ class CodeReviewer:
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.model,
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )
@@ -207,7 +211,7 @@ class CodeReviewer:
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.model,
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )
@@ -249,7 +253,7 @@ class CodeReviewer:
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.model,
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )

@@ -28,7 +28,6 @@ public class BuildTool : Editor
     {
         List<AssetBundleBuild> assetBundleBuilds = new List<AssetBundleBuild>();
         string[] files = Directory.GetFiles(PathUtil.BuildResourcesPath, "*", SearchOption.AllDirectories);
-        // 不处理meta文件
         for (int i = 0; i < files.Length; i++)
         {
             if (files[i].EndsWith(".meta"))

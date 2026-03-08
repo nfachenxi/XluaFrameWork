@@ -37,6 +37,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
           UNITY_PROJECT_PATH: ${{ secrets.UNITY_PROJECT_PATH }}
           EXCLUDE_DIRS: ${{ secrets.EXCLUDE_DIRS }}
         run: |
