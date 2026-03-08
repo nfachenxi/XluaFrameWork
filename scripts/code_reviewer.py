@@ -2,6 +2,7 @@
 """
 Unity Code Review Tool
 三轮评估：代码质量 -> Unity最佳实践 -> 综合评估
+支持多线程并发评估，每个文件单独发送 Webhook
 """
 
 import os
@@ -11,12 +12,14 @@ import requests
 from typing import List, Dict, Any
 from openai import OpenAI
 import git
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 
 class CodeReviewer:
     def __init__(self):
         self.api_key = os.getenv('OPENAI_API_KEY')
-        self.api_base = os.getenv('OPENAI_API_BASE', 'https://api.deepseek.com/v1')
+        self.api_base = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
         self.webhook_url = os.getenv('WEBHOOK_URL')
         
         # Unity 项目路径配置（相对于仓库根目录）
@@ -36,6 +39,9 @@ class CodeReviewer:
         
         print(f"📁 Unity 项目路径: {self.unity_project_path}")
         print(f"🚫 排除目录: {', '.join(self.exclude_dirs)}")
+        
+        # 线程锁，用于保护 Webhook 发送
+        self.webhook_lock = threading.Lock()
         
         # 加载提示词模板
         self.prompt_round1 = self._load_prompt('prompts/round1_code_quality.txt')
@@ -166,7 +172,7 @@ class CodeReviewer:
         
         try:
             response = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )
@@ -196,7 +202,7 @@ class CodeReviewer:
         
         try:
             response = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )
@@ -233,7 +239,7 @@ class CodeReviewer:
         
         try:
             response = self.client.chat.completions.create(
-                model="deepseek-chat",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )
@@ -254,72 +260,132 @@ class CodeReviewer:
                 'error': f"综合评估失败: {str(e)}"
             }
 
-    def format_webhook_message(self, results: List[Dict[str, str]]) -> Dict[str, str]:
-        """格式化webhook消息，符合KoiShi机器人的模板格式"""
-        if not results:
-            return {
-                'title': 'Unity代码审查',
-                'summary': '没有检测到C#代码变更',
-                'details': '本次提交未包含需要审查的C#文件'
-            }
+    def format_webhook_message(self, file_path: str, file_status: str, 
+                              round1_result: str, round2_result: str, 
+                              round3_result: str, file_index: int, total_files: int) -> Dict[str, str]:
+        """格式化单个文件的 webhook 消息（简化版，避免截断）"""
         
-        # 构建摘要
-        total_files = len(results)
-        new_files = sum(1 for r in results if r.get('file_status') == 'new')
-        modified_files = sum(1 for r in results if r.get('file_status') == 'modified')
+        # 提取关键信息（评分）
+        def extract_score(text: str) -> str:
+            """提取评分信息"""
+            lines = text.split('\n')
+            scores = []
+            for line in lines[:15]:  # 只看前15行
+                if '评分' in line or '得分' in line or '/100' in line:
+                    scores.append(line.strip())
+            return '\n'.join(scores[:5]) if scores else '评分信息未找到'
         
-        summary = f"共审查 {total_files} 个文件（新增: {new_files}, 修改: {modified_files}）"
-        
-        # 构建详细信息
-        details_parts = []
-        for idx, result in enumerate(results, 1):
-            if 'error' in result:
-                details_parts.append(f"[{idx}] {result['file_path']}\n错误: {result['error']}")
-                continue
+        # 提取关键问题
+        def extract_key_issues(text: str) -> str:
+            """提取关键问题（前500字符）"""
+            # 查找问题部分
+            if 'P0' in text or '必须立即修复' in text:
+                start = text.find('P0')
+                if start != -1:
+                    return text[start:start+500] + '...'
             
-            file_detail = f"""[{idx}] {result['file_path']} ({result['file_status']})
-
-📊 第一轮-代码质量评估:
-{result['round1_quality'][:300]}...
-
-🎮 第二轮-Unity最佳实践:
-{result['round2_unity'][:300]}...
-
-✅ 综合评估与建议:
-{result['final_review'][:500]}...
-"""
-            details_parts.append(file_detail)
+            # 否则返回前500字符
+            return text[:500] + '...' if len(text) > 500 else text
         
-        details = "\n\n" + "="*50 + "\n\n".join(details_parts)
+        # 构建简化消息
+        title = f"📄 文件 [{file_index}/{total_files}]: {os.path.basename(file_path)}"
+        
+        summary = f"""状态: {file_status}
+路径: {file_path}
+
+📊 评分摘要:
+{extract_score(round3_result)}
+
+⚠️ 关键问题:
+{extract_key_issues(round3_result)}
+
+💡 提示: 完整报告请查看 GitHub Actions 日志"""
         
         return {
-            'title': 'Unity代码审查报告',
+            'title': title,
             'summary': summary,
-            'details': details,
+            'file_path': file_path,
+            'file_status': file_status,
+            'file_index': str(file_index),
+            'total_files': str(total_files),
             'repo': os.getenv('GITHUB_REPOSITORY', 'Unknown'),
             'commit': os.getenv('GITHUB_SHA', 'Unknown')[:7]
         }
     
     def send_webhook(self, message: Dict[str, str]):
-        """发送webhook到KoiShi机器人平台"""
+        """发送 webhook 到 KoiShi 机器人平台（线程安全）"""
+        with self.webhook_lock:
+            try:
+                response = requests.post(
+                    self.webhook_url,
+                    json=message,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    print(f"  ✅ Webhook sent: {message.get('title', 'Unknown')}")
+                else:
+                    print(f"  ⚠️ Webhook returned status code: {response.status_code}")
+            except Exception as e:
+                print(f"  ❌ Failed to send webhook: {e}")
+    
+    def review_single_file(self, file_info: Dict[str, Any], file_index: int, total_files: int) -> Dict[str, Any]:
+        """评估单个文件（三轮评估）"""
+        file_path = file_info['path']
+        print(f"\n[{file_index}/{total_files}] 🔍 Reviewing: {file_path}")
+        
         try:
-            response = requests.post(
-                self.webhook_url,
-                json=message,
-                headers={'Content-Type': 'application/json'},
-                timeout=30
+            # 第一轮：代码质量
+            print(f"  - Round 1: Code Quality...")
+            round1_result = self.review_round_1_quality(file_info)
+            
+            # 第二轮：Unity 最佳实践
+            print(f"  - Round 2: Unity Best Practices...")
+            round2_result = self.review_round_2_unity(file_info)
+            
+            # 第三轮：综合评估
+            print(f"  - Round 3: Comprehensive Review...")
+            round3_result = self.review_round_3_comprehensive(
+                file_info, round1_result, round2_result
             )
             
-            if response.status_code == 200:
-                print("✅ Webhook sent successfully")
-            else:
-                print(f"⚠️ Webhook returned status code: {response.status_code}")
-                print(f"Response: {response.text}")
+            # 立即发送 Webhook（每个文件单独发送）
+            print(f"  - Sending webhook...")
+            message = self.format_webhook_message(
+                file_path=file_info['path'],
+                file_status=file_info['status'],
+                round1_result=round1_result,
+                round2_result=round2_result,
+                round3_result=round3_result['final_review'] if isinstance(round3_result, dict) else round3_result,
+                file_index=file_index,
+                total_files=total_files
+            )
+            self.send_webhook(message)
+            
+            return round3_result
+            
         except Exception as e:
-            print(f"❌ Failed to send webhook: {e}")
+            error_msg = f"评估失败: {str(e)}"
+            print(f"  ❌ {error_msg}")
+            
+            # 发送错误通知
+            error_message = {
+                'title': f"❌ 文件 [{file_index}/{total_files}]: {os.path.basename(file_path)}",
+                'summary': f"评估失败\n路径: {file_path}\n错误: {error_msg}",
+                'file_path': file_path,
+                'error': error_msg
+            }
+            self.send_webhook(error_message)
+            
+            return {
+                'file_path': file_path,
+                'file_status': file_info['status'],
+                'error': error_msg
+            }
     
     def run(self):
-        """执行完整的代码审查流程"""
+        """执行完整的代码审查流程（多线程版本）"""
         print("🚀 Starting Unity Code Review...")
         
         # 获取变更的文件
@@ -327,36 +393,62 @@ class CodeReviewer:
         
         if not changed_files:
             print("ℹ️ No C# files changed")
-            message = self.format_webhook_message([])
+            # 发送无变更通知
+            message = {
+                'title': '✅ Unity代码审查',
+                'summary': '没有检测到C#代码变更',
+                'repo': os.getenv('GITHUB_REPOSITORY', 'Unknown'),
+                'commit': os.getenv('GITHUB_SHA', 'Unknown')[:7]
+            }
             self.send_webhook(message)
             return
         
-        print(f"📝 Found {len(changed_files)} changed C# file(s)")
+        total_files = len(changed_files)
+        print(f"📝 Found {total_files} changed C# file(s)")
         
-        # 对每个文件进行三轮评估
+        # 发送开始通知
+        start_message = {
+            'title': '🚀 Unity代码审查开始',
+            'summary': f'共 {total_files} 个文件待审查\n仓库: {os.getenv("GITHUB_REPOSITORY", "Unknown")}\n提交: {os.getenv("GITHUB_SHA", "Unknown")[:7]}',
+            'total_files': str(total_files)
+        }
+        self.send_webhook(start_message)
+        
+        # 使用线程池并发评估（最多4个线程）
+        max_workers = min(4, total_files)
+        print(f"⚡ Using {max_workers} threads for parallel review")
+        
         results = []
-        for idx, file_info in enumerate(changed_files, 1):
-            print(f"\n[{idx}/{len(changed_files)}] Reviewing: {file_info['path']}")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有任务
+            future_to_file = {
+                executor.submit(self.review_single_file, file_info, idx, total_files): file_info
+                for idx, file_info in enumerate(changed_files, 1)
+            }
             
-            print("  - Round 1: Code Quality...")
-            round1_result = self.review_round_1_quality(file_info)
-            
-            print("  - Round 2: Unity Best Practices...")
-            round2_result = self.review_round_2_unity(file_info)
-            
-            print("  - Round 3: Comprehensive Review...")
-            round3_result = self.review_round_3_comprehensive(
-                file_info, round1_result, round2_result
-            )
-            
-            results.append(round3_result)
+            # 等待所有任务完成
+            for future in as_completed(future_to_file):
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    print(f"❌ Thread execution error: {e}")
         
-        # 格式化并发送webhook
-        print("\n📤 Sending webhook...")
-        message = self.format_webhook_message(results)
-        self.send_webhook(message)
+        # 发送完成通知
+        success_count = sum(1 for r in results if 'error' not in r)
+        error_count = len(results) - success_count
         
-        print("\n✨ Code review completed!")
+        completion_message = {
+            'title': '✨ Unity代码审查完成',
+            'summary': f'总计: {total_files} 个文件\n成功: {success_count} 个\n失败: {error_count} 个\n\n详细报告已分别发送',
+            'repo': os.getenv('GITHUB_REPOSITORY', 'Unknown'),
+            'commit': os.getenv('GITHUB_SHA', 'Unknown')[:7]
+        }
+        self.send_webhook(completion_message)
+        
+        print(f"\n✨ Code review completed!")
+        print(f"   Success: {success_count}/{total_files}")
+        print(f"   Failed: {error_count}/{total_files}")
 
 
 def main():

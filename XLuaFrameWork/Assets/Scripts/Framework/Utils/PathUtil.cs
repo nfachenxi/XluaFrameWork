@@ -28,8 +28,8 @@ namespace Framework.Utils
         /// <summary>
         /// 获取标准路径
         /// </summary>
-        /// <param name="path"></param>
-        /// <returns></returns>
+        /// <param name="path">初始路径</param>
+        /// <returns>标准路径</returns>
         public static string GetStandardPath(string path)
         {
             if(string.IsNullOrEmpty(path))
