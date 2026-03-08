@@ -350,6 +350,12 @@ class CodeReviewer:
                 file_info, round1_result, round2_result
             )
             
+            # 提取最终评估结果
+            if isinstance(round3_result, dict):
+                final_review = round3_result.get('final_review', '')
+            else:
+                final_review = str(round3_result)
+            
             # 立即发送 Webhook（每个文件单独发送）
             print(f"  - Sending webhook...")
             message = self.format_webhook_message(
@@ -357,7 +363,7 @@ class CodeReviewer:
                 file_status=file_info['status'],
                 round1_result=round1_result,
                 round2_result=round2_result,
-                round3_result=round3_result['final_review'] if isinstance(round3_result, dict) else round3_result,
+                round3_result=final_review,
                 file_index=file_index,
                 total_files=total_files
             )

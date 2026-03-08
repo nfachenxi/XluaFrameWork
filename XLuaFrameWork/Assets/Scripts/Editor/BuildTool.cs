@@ -27,7 +27,7 @@ public class BuildTool : Editor
     static void Build(BuildTarget target)
     {
         List<AssetBundleBuild> assetBundleBuilds = new List<AssetBundleBuild>();
-        // 获取到所有文件
+        // 获取到所有文件的文件路径
         string[] files = Directory.GetFiles(PathUtil.BuildResourcesPath, "*", SearchOption.AllDirectories);
         // 不处理meta文件
         for (int i = 0; i < files.Length; i++)
