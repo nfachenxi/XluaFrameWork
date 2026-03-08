@@ -5,7 +5,7 @@ namespace Framework.Utils
     public class PathUtil
     {
         // 根目录
-        public static readonly string AssetsPath = Application.dataPath;
+        private static readonly string AssetsPath = Application.dataPath;
         
         // 需要打Bundle的目录
         public static readonly string BuildResourcesPath = AssetsPath + "/BuildResources/";

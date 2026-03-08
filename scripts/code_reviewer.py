@@ -176,9 +176,14 @@ class CodeReviewer:
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )
-            return response.choices[0].message.content
+            result = response.choices[0].message.content
+            if not result or len(result) < 50:
+                return f"评估失败: API 返回内容过短或为空 (长度: {len(result) if result else 0})"
+            return result
         except Exception as e:
-            return f"评估失败: {str(e)}"
+            error_detail = f"API调用失败: {type(e).__name__}: {str(e)}"
+            print(f"    ⚠️ {error_detail}")
+            return f"评估失败: {error_detail}"
     
     def review_round_2_unity(self, file_info: Dict[str, Any]) -> str:
         """第二轮评估：Unity最佳实践（性能、内存管理）"""
@@ -206,9 +211,14 @@ class CodeReviewer:
                 messages=[{"role": "user", "content": full_prompt}],
                 temperature=0.3
             )
-            return response.choices[0].message.content
+            result = response.choices[0].message.content
+            if not result or len(result) < 50:
+                return f"评估失败: API 返回内容过短或为空 (长度: {len(result) if result else 0})"
+            return result
         except Exception as e:
-            return f"评估失败: {str(e)}"
+            error_detail = f"API调用失败: {type(e).__name__}: {str(e)}"
+            print(f"    ⚠️ {error_detail}")
+            return f"评估失败: {error_detail}"
     
     def review_round_3_comprehensive(self, file_info: Dict[str, Any], 
                                      round1_result: str, round2_result: str) -> Dict[str, str]:
@@ -246,6 +256,13 @@ class CodeReviewer:
             
             final_result = response.choices[0].message.content
             
+            if not final_result or len(final_result) < 50:
+                return {
+                    'file_path': file_info['path'],
+                    'file_status': file_info['status'],
+                    'error': f"API 返回内容过短或为空 (长度: {len(final_result) if final_result else 0})"
+                }
+            
             return {
                 'file_path': file_info['path'],
                 'file_status': file_info['status'],
@@ -254,10 +271,12 @@ class CodeReviewer:
                 'final_review': final_result
             }
         except Exception as e:
+            error_detail = f"API调用失败: {type(e).__name__}: {str(e)}"
+            print(f"    ⚠️ {error_detail}")
             return {
                 'file_path': file_info['path'],
                 'file_status': file_info['status'],
-                'error': f"综合评估失败: {str(e)}"
+                'error': error_detail
             }
 
     def format_webhook_message(self, file_path: str, file_status: str, 
@@ -340,9 +359,17 @@ class CodeReviewer:
             print(f"  - Round 1: Code Quality...")
             round1_result = self.review_round_1_quality(file_info)
             
+            # 检查第一轮是否失败
+            if round1_result.startswith("评估失败"):
+                raise Exception(f"Round 1 failed: {round1_result}")
+            
             # 第二轮：Unity 最佳实践
             print(f"  - Round 2: Unity Best Practices...")
             round2_result = self.review_round_2_unity(file_info)
+            
+            # 检查第二轮是否失败
+            if round2_result.startswith("评估失败"):
+                raise Exception(f"Round 2 failed: {round2_result}")
             
             # 第三轮：综合评估
             print(f"  - Round 3: Comprehensive Review...")
@@ -350,9 +377,15 @@ class CodeReviewer:
                 file_info, round1_result, round2_result
             )
             
+            # 检查第三轮是否失败
+            if isinstance(round3_result, dict) and 'error' in round3_result:
+                raise Exception(f"Round 3 failed: {round3_result['error']}")
+            
             # 提取最终评估结果
             if isinstance(round3_result, dict):
                 final_review = round3_result.get('final_review', '')
+                if not final_review:
+                    raise Exception("Round 3 returned empty final_review")
             else:
                 final_review = str(round3_result)
             
@@ -369,11 +402,17 @@ class CodeReviewer:
             )
             self.send_webhook(message)
             
+            print(f"  ✅ Review completed successfully")
             return round3_result
             
         except Exception as e:
             error_msg = f"评估失败: {str(e)}"
             print(f"  ❌ {error_msg}")
+            
+            # 打印详细的错误堆栈（用于调试）
+            import traceback
+            print(f"  📋 Error details:")
+            traceback.print_exc()
             
             # 发送错误通知
             error_message = {
