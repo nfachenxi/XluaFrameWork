@@ -100,3 +100,4 @@ Thumbs.db
 *.tmp
 *.bak
 Logs/
+/XLuaFrameWork/Logs
